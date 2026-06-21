@@ -13,7 +13,7 @@ export async function captureAndScrape(
   await fs.mkdir(outDir, { recursive: true });
   const browser = await chromium.launch();
   try {
-    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    const page = await browser.newPage({ viewport: { width: 1440, height: TILE_HEIGHT } });
     await page.goto(url, { waitUntil: "networkidle", timeout: 60000 });
 
     // Trigger lazy-loading: scroll to bottom in steps, then back to top.
@@ -39,28 +39,20 @@ export async function captureAndScrape(
     const pageHeight = await page.evaluate(() => document.body.scrollHeight);
 
     // Slice using clip screenshots: scroll page to each tile's Y offset, then capture
-    // a viewport-sized clip starting at y=0. This keeps the clip within the viewport bounds.
-    const tiles: string[] = [];
+    // a viewport-sized clip starting at y=0. Viewport height == TILE_HEIGHT so the full
+    // clip is always valid. Use actual scrollY to handle bottom-clamp correctly (no gaps).
     const tileCount = Math.min(MAX_TILES, Math.ceil(pageHeight / TILE_HEIGHT));
+    const tiles: string[] = [];
     for (let i = 0; i < tileCount; i++) {
-      const scrollY = i * TILE_HEIGHT;
-      const remaining = pageHeight - scrollY;
-      if (remaining <= 10) break; // skip degenerate tiles
-      const h = Math.min(TILE_HEIGHT, remaining, 900); // clip within viewport height
-      const tilePath = path.join(outDir, `tile-${i}.png`);
-      // Scroll to tile position so the clip region is within the viewport.
-      await page.evaluate((y: number) => window.scrollTo(0, y), scrollY);
+      const targetY = i * TILE_HEIGHT;
+      await page.evaluate((y) => window.scrollTo(0, y), targetY);
       await page.waitForTimeout(150);
-      try {
-        await page.screenshot({
-          path: tilePath,
-          clip: { x: 0, y: 0, width: 1440, height: h },
-        });
-        tiles.push(tilePath);
-      } catch {
-        // Clip out of bounds — skip gracefully.
-        break;
-      }
+      const actualY = await page.evaluate(() => window.scrollY);
+      const h = Math.min(TILE_HEIGHT, pageHeight - actualY);
+      if (h <= 10) break;
+      const tilePath = path.join(outDir, `tile-${i}.png`);
+      await page.screenshot({ path: tilePath, clip: { x: 0, y: 0, width: 1440, height: h } });
+      tiles.push(tilePath);
     }
     // Reset scroll to top after tiling.
     await page.evaluate(() => window.scrollTo(0, 0));
