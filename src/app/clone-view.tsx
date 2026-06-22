@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type SectionItem = { name: string; html: string };
 
@@ -14,6 +14,7 @@ export default function CloneView() {
   const [error, setError] = useState<string>("");
   const [showCode, setShowCode] = useState(false);
   const esRef = useRef<EventSource | null>(null);
+  const runningRef = useRef(false);
 
   const srcDoc =
     head || sections.length
@@ -25,6 +26,7 @@ export default function CloneView() {
   function start() {
     if (!url.trim() || running) return;
     setRunning(true);
+    runningRef.current = true;
     setError("");
     setStage("starting");
     setThoughts("");
@@ -41,27 +43,34 @@ export default function CloneView() {
       else if (e.type === "section") setSections((s) => [...s, { name: e.name, html: e.html }]);
       else if (e.type === "done") {
         setFullHtml(e.fullHtml);
+        runningRef.current = false;
         setRunning(false);
         es.close();
       } else if (e.type === "error") {
         setError(e.message);
+        runningRef.current = false;
         setRunning(false);
         es.close();
       }
     };
     es.onerror = () => {
-      if (running) setError("Connection lost");
+      if (runningRef.current) setError("Connection lost");
+      runningRef.current = false;
       setRunning(false);
       es.close();
     };
   }
 
+  useEffect(() => () => { esRef.current?.close(); }, []);
+
   function download() {
     const blob = new Blob([fullHtml], { type: "text/html" });
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(blob);
+    a.href = url;
     a.download = "clone.html";
     a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   function openTab() {
     const w = window.open();
@@ -100,7 +109,7 @@ export default function CloneView() {
         <div className="mb-2 font-medium">Sections</div>
         <ul className="mb-4 space-y-1">
           {sections.map((s, i) => (
-            <li key={i} className="text-green-700">&#10003; {s.name}</li>
+            <li key={s.name + i} className="text-green-700">&#10003; {s.name}</li>
           ))}
           {running && <li className="text-gray-400">…generating</li>}
         </ul>
