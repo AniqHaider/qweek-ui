@@ -50,6 +50,8 @@ export async function* generate(
   let done = false;
   let stderr = "";
   let exitErr: Error | null = null;
+  let headHtml = "";
+  const sectionHtmls: string[] = [];
 
   const wake = () => { if (resolveWait) { resolveWait(); resolveWait = null; } };
 
@@ -96,31 +98,18 @@ export async function* generate(
   });
 
   while (true) {
-    if (queue.length) { yield queue.shift()!; continue; }
+    if (queue.length) {
+      const ev = queue.shift()!;
+      if (ev.type === "head") headHtml = ev.html;
+      else if (ev.type === "section") sectionHtmls.push(ev.html);
+      yield ev;
+      continue;
+    }
     if (done) break;
     await new Promise<void>((res) => { resolveWait = res; });
   }
   if (exitErr) throw exitErr;
-  yield { type: "done", fullHtml: wrapHtml(parser.assemble()) };
-}
-
-function wrapHtml(body: string): string {
-  // If the model already emitted a HEAD block, parser.assemble() begins with head content.
-  // Wrap head + sections into a valid document.
-  const headMatch = /<\s*meta|<\s*script|<\s*style|<\s*link|<\s*title/i.test(body);
-  if (!headMatch) {
-    return `<!doctype html><html><head><meta charset="utf-8"><script src="https://cdn.tailwindcss.com"></script></head><body>${body}</body></html>`;
-  }
-  // Heuristic: first head-ish content up to first top-level section element becomes <head>.
-  return `<!doctype html><html><head>${extractHead(body)}</head><body>${extractBody(body)}</body></html>`;
-}
-
-// The parser joins head first then sections. We re-split on the first section-like element.
-function extractHead(body: string): string {
-  const idx = body.search(/<(section|header|footer|main|div)[\s>]/i);
-  return idx > 0 ? body.slice(0, idx) : body;
-}
-function extractBody(body: string): string {
-  const idx = body.search(/<(section|header|footer|main|div)[\s>]/i);
-  return idx > 0 ? body.slice(idx) : "";
+  const head = headHtml || `<meta charset="utf-8"><script src="https://cdn.tailwindcss.com"></script>`;
+  const fullHtml = `<!doctype html>\n<html>\n<head>\n${head}\n</head>\n<body>\n${sectionHtmls.join("\n")}\n</body>\n</html>`;
+  yield { type: "done", fullHtml };
 }
