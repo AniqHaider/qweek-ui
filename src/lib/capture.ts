@@ -14,7 +14,12 @@ export async function captureAndScrape(
   const browser = await chromium.launch();
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: TILE_HEIGHT } });
-    await page.goto(url, { waitUntil: "networkidle", timeout: 60000 });
+    // Gate on domcontentloaded (fires reliably). Do NOT gate on "networkidle":
+    // commerce sites with analytics/chat/pixels keep the network busy forever and
+    // never reach idle, so goto would time out (e.g. bblunt.com). Give the network
+    // a best-effort window to settle afterward, but never fail on it.
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.waitForLoadState("networkidle", { timeout: 12000 }).catch(() => {});
 
     // Trigger lazy-loading: scroll to bottom in steps, then back to top.
     await page.evaluate(async () => {
