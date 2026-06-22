@@ -10,10 +10,14 @@ async function fileToBase64(p: string): Promise<string> {
   return buf.toString("base64");
 }
 
+const GEN_TIMEOUT_MS = 6 * 60 * 1000;
+
 export async function* generate(
   prompt: string,
-  tilePaths: string[]
+  tilePaths: string[],
+  signal?: AbortSignal
 ): AsyncGenerator<CloneEvent> {
+  if (signal?.aborted) return;
   // Build the stream-json user message: prompt text + screenshot tiles as image blocks.
   const content: any[] = [{ type: "text", text: prompt }];
   for (const p of tilePaths) {
@@ -55,6 +59,24 @@ export async function* generate(
 
   const wake = () => { if (resolveWait) { resolveWait(); resolveWait = null; } };
 
+  const watchdog = setTimeout(() => {
+    try { child.kill("SIGTERM"); } catch {}
+    exitErr = new Error("Generation timed out");
+    done = true;
+    wake();
+  }, GEN_TIMEOUT_MS);
+
+  let onAbort: (() => void) | undefined;
+  if (signal) {
+    onAbort = () => {
+      try { child.kill("SIGTERM"); } catch {}
+      exitErr = new Error("aborted");
+      done = true;
+      wake();
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  }
+
   let lineBuf = "";
   const handleLine = (line: string) => {
     const trimmed = line.trim();
@@ -89,8 +111,9 @@ export async function* generate(
     }
   });
   child.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
-  child.on("error", (e) => { exitErr = e; done = true; wake(); });
+  child.on("error", (e) => { clearTimeout(watchdog); exitErr = e; done = true; wake(); });
   child.on("close", (code) => {
+    clearTimeout(watchdog);
     if (lineBuf.trim()) handleLine(lineBuf);
     if (code !== 0 && code !== null) exitErr = new Error(`claude exited ${code}: ${stderr.slice(0, 500)}`);
     done = true;
@@ -108,7 +131,10 @@ export async function* generate(
     if (done) break;
     await new Promise<void>((res) => { resolveWait = res; });
   }
+  clearTimeout(watchdog);
+  signal?.removeEventListener("abort", onAbort!);
   if (exitErr) throw exitErr;
+  if (!headHtml && sectionHtmls.length === 0) throw new Error("Model produced no output");
   const head = headHtml || `<meta charset="utf-8"><script src="https://cdn.tailwindcss.com"></script>`;
   const fullHtml = `<!doctype html>\n<html>\n<head>\n${head}\n</head>\n<body>\n${sectionHtmls.join("\n")}\n</body>\n</html>`;
   yield { type: "done", fullHtml };

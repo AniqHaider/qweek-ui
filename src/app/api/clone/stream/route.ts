@@ -15,6 +15,7 @@ export async function GET(req: NextRequest) {
   const raw = req.nextUrl.searchParams.get("url") ?? "";
   const encoder = new TextEncoder();
 
+  const ac = new AbortController();
   const stream = new ReadableStream({
     async start(controller) {
       const send = (e: CloneEvent) => controller.enqueue(encoder.encode(sseLine(e)));
@@ -26,7 +27,7 @@ export async function GET(req: NextRequest) {
         send({ type: "stage", stage: "scraping" });
         const prompt = buildPrompt(scrape);
         send({ type: "stage", stage: "generating" });
-        for await (const e of generate(prompt, capture.tiles)) {
+        for await (const e of generate(prompt, capture.tiles, ac.signal)) {
           send(e);
         }
       } catch (err: unknown) {
@@ -37,6 +38,7 @@ export async function GET(req: NextRequest) {
         fs.rm(jobDir, { recursive: true, force: true }).catch(() => {});
       }
     },
+    cancel() { ac.abort(); },
   });
 
   return new Response(stream, {

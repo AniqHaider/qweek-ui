@@ -4,7 +4,7 @@ import path from "path";
 import type { CaptureResult, ScrapeResult } from "./types";
 
 const TILE_HEIGHT = 1400;
-const MAX_TILES = 12;
+const MAX_TILES = 8;
 
 export async function captureAndScrape(
   url: string,
