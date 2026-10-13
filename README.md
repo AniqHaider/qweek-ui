@@ -1,5 +1,7 @@
 # qweek-ui
 
+> **Windows?** See [SETUP-WINDOWS.md](SETUP-WINDOWS.md).
+
 Paste a URL → get a self-contained Tailwind-CDN HTML clone of its homepage, rendered live as it generates. Backend generation runs on your Claude Max subscription via the `claude` CLI (no API key).
 
 ## Prerequisites
